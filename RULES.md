@@ -1,6 +1,7 @@
 # Coding Rules for AI
 
 ## Solana / Anchor
+
 - Always use Anchor 0.30+ syntax
 - Always use Token-2022 (not legacy SPL Token)
 - Always store user data in PDA accounts, never inside the program
@@ -9,7 +10,17 @@
 - Add #[error_code] for every custom error
 
 ## General
+
 - Never hardcode private keys or wallet addresses
 - All secrets go in .env file
 - Split every task into the smallest possible step
 - Write one instruction per Anchor function
+
+## Code Style
+
+- No inline comments explaining obvious things
+- No block comments above every function
+- Short variable names where obvious: ctx, acc, ts for timestamp
+- Group related code with one blank line
+- No redundant type annotations where Rust infers them
+- Frontend: compact components, no unnecessary abstractions

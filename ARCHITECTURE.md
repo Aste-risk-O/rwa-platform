@@ -1,61 +1,53 @@
-
 # RWA Platform — Architecture
 
-## What it does
-
+## Concept
 Fractional investment into Astana street-retail real estate.
+MVP: 1 real asset (coffee shop, real address), investors buy share tokens,
+receive yield in lamports (USDC in v2), can sell back at 10% discount.
 
-MVP: investors buy share tokens,
+## Current Stack
+- Anchor CLI: 0.32.1
+- anchor-lang: 0.32.1
+- Solana/Agave toolchain: 2.3.0
+- JS: @coral-xyz/anchor ^0.32.1
+- Frontend: Next.js 14, Tailwind CSS (planned)
+- Wallet: Phantom via @solana/wallet-adapter (planned)
 
-receive USDC yield, can sell back at 15% discount.
+## On-chain (DEPLOYED, lamports MVP)
+1. initialize_asset — creates AssetState PDA, sets admin
+2. add_to_whitelist — admin adds wallet to UserState PDA
+3. buy_shares — whitelist check, transfers lamports, updates shares
+4. claim_yield — (now - last_claim) * shares * rate / 86400
+5. instant_sell — returns shares, pays 90% of SHARE_PRICE back
 
-## Stack
+## PDA Accounts
+AssetState (seeds: ["asset"]):
+  total_shares, sold_shares, yield_rate, reserve_pool,
+  document_hash: [u8;32], asset_name, asset_uri, admin, bump
 
-- Contract: Anchor 0.30+, Token-2022, Solana devnet
+UserState (seeds: ["user", wallet]):
+  wallet, shares_owned, last_claim_timestamp, is_whitelisted, bump
 
-- Frontend: Next.js 14, Tailwind CSS
+## Asset Binding (Proof-of-Asset)
+- Real PDF lease agreement for coffee shop in Astana
+- SHA-256 hash stored in AssetState.document_hash
+- Token metadata URI points to JSON: name, address, area, rent, photo, hash
+- Anyone can verify: download PDF → compute hash → compare on-chain
 
-- Wallet: Phantom via @solana/wallet-adapter
+## Planned (v2, post-MVP)
+- Token-2022 with Transfer Hook for KYC whitelist enforcement at L1
+- USDC real payments via SPV → Binance KZ → reward pool
+- Solana Blinks for Telegram purchases
+- SumSub KYC → add_to_whitelist automation
+- P2P order book when reserve pool empty
 
-- API: Next.js API routes only
+## What is NOT on-chain (intentional)
+- KYC data (off-chain, SumSub or mock)
+- PDF document itself (too large)
+- Rent payment confirmations (SPV bank account)
 
-## On-chain logic
-
-1. mint_shares — owner mints fixed supply of share tokens
-
-2. buy_shares — user pays USDC, receives share tokens, checks whitelist
-
-3. add_to_whitelist — admin adds verified wallet to PDA
-
-4. claim_yield — calculates (now - last_claim) * rate, sends USDC
-
-5. instant_sell — user returns tokens, gets USDC minus 15% discount
-
-## Accounts (PDA)
-
-- AssetState: total_shares, sold_shares, yield_rate, reserve_pool
-
-- UserState: wallet, shares_owned, last_claim_timestamp, is_whitelisted
-
-
-## Asset Binding Mechanism
-
-### How a real asset connects to the token
-1. PDF lease agreement exists (real document, real Astana address)
-2. SHA-256 hash of PDF is computed off-chain
-3. Hash is stored in AssetState PDA field: document_hash: [u8; 32]
-4. Token metadata URI points to JSON with: name, address, area, rent, photo, hash
-5. Anyone can verify: download PDF → compute hash → compare with on-chain hash
-
-### Extra fields in AssetState
-- document_hash: [u8; 32]  — SHA-256 of lease agreement PDF
-- asset_name: String        — e.g. "Surf Coffee, Baykonurova 12, Astana"
-- asset_uri: String         — link to metadata JSON (IPFS or Vercel)
-
-### What is NOT on-chain (intentionally)
-- The PDF itself (too large)
-- Rent payment confirmations (off-chain, SPV bank account)
-- KYC data (off-chain, mock for hackathon)
-
-### Trust flow for jury
-PDF exists → hash matches on-chain → token is legitimate
+## Legal Structure
+- SPV in AIFC (МФЦА) jurisdiction, English law
+- FinTech Lab sandbox application in progress
+- Token = revenue share right, not property ownership
+- Umbrella SPV model, trust management agreement
