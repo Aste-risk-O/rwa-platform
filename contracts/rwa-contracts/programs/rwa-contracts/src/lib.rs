@@ -2,6 +2,10 @@ use anchor_lang::{
     prelude::*,
     system_program::{self, Transfer},
 };
+use anchor_spl::{
+    associated_token::AssociatedToken,
+    token_interface::{self, Burn, Mint, MintTo, TokenAccount, TokenInterface},
+};
 
 declare_id!("AH6kQ9Uz3Pzizt7hLwjpKhTFRCK5yS3pMjHSVAAaGasB");
 
@@ -12,6 +16,16 @@ const SECONDS_PER_DAY: u64 = 86_400;
 pub mod rwa_contracts {
     use super::*;
 
+    pub fn initialize_marketplace(ctx: Context<InitializeMarketplace>) -> Result<()> {
+        let acc = &mut ctx.accounts.marketplace;
+
+        acc.admin = ctx.accounts.admin.key();
+        acc.next_asset_id = 0;
+        acc.bump = ctx.bumps.marketplace;
+
+        Ok(())
+    }
+
     pub fn initialize_asset(
         ctx: Context<InitializeAsset>,
         total_shares: u64,
@@ -20,8 +34,16 @@ pub mod rwa_contracts {
         asset_name: String,
         asset_uri: String,
     ) -> Result<()> {
+        require_keys_eq!(
+            ctx.accounts.admin.key(),
+            ctx.accounts.marketplace.admin,
+            RwaError::AdminOnly
+        );
+
+        let id = ctx.accounts.marketplace.next_asset_id;
         let acc = &mut ctx.accounts.asset_state;
 
+        acc.asset_id = id;
         acc.total_shares = total_shares;
         acc.sold_shares = 0;
         acc.yield_rate = yield_rate;
@@ -30,7 +52,36 @@ pub mod rwa_contracts {
         acc.asset_name = asset_name;
         acc.asset_uri = asset_uri;
         acc.admin = ctx.accounts.admin.key();
+        acc.share_mint = Pubkey::default();
         acc.bump = ctx.bumps.asset_state;
+        acc.share_mint_bump = 0;
+
+        ctx.accounts.marketplace.next_asset_id = ctx
+            .accounts
+            .marketplace
+            .next_asset_id
+            .checked_add(1)
+            .ok_or(RwaError::InsufficientFunds)?;
+
+        Ok(())
+    }
+
+    pub fn initialize_share_mint(ctx: Context<InitializeShareMint>) -> Result<()> {
+        require_keys_eq!(
+            ctx.accounts.admin.key(),
+            ctx.accounts.asset_state.admin,
+            RwaError::AdminOnly
+        );
+        require_keys_eq!(
+            ctx.accounts.token_program.key(),
+            anchor_spl::token_2022::ID,
+            RwaError::InvalidTokenProgram
+        );
+
+        let acc = &mut ctx.accounts.asset_state;
+
+        acc.share_mint = ctx.accounts.share_mint.key();
+        acc.share_mint_bump = ctx.bumps.share_mint;
 
         Ok(())
     }
@@ -55,6 +106,16 @@ pub mod rwa_contracts {
 
     pub fn buy_shares(ctx: Context<BuyShares>, amount: u64) -> Result<()> {
         require!(ctx.accounts.user_state.is_whitelisted, RwaError::NotWhitelisted);
+        require_keys_eq!(
+            ctx.accounts.token_program.key(),
+            anchor_spl::token_2022::ID,
+            RwaError::InvalidTokenProgram
+        );
+        require_keys_eq!(
+            ctx.accounts.asset_state.share_mint,
+            ctx.accounts.share_mint.key(),
+            RwaError::InvalidShareMint
+        );
 
         let available = ctx
             .accounts
@@ -68,14 +129,31 @@ pub mod rwa_contracts {
             .checked_mul(SHARE_PRICE_LAMPORTS)
             .ok_or(RwaError::InsufficientFunds)?;
 
-        let cpi = CpiContext::new(
+        let pay_ctx = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
             Transfer {
                 from: ctx.accounts.buyer.to_account_info(),
                 to: ctx.accounts.asset_state.to_account_info(),
             },
         );
-        system_program::transfer(cpi, pay)?;
+        system_program::transfer(pay_ctx, pay)?;
+
+        let seeds: &[&[u8]] = &[
+            b"asset".as_ref(),
+            &ctx.accounts.asset_state.asset_id.to_le_bytes(),
+            &[ctx.accounts.asset_state.bump],
+        ];
+        let signer = &[seeds];
+        let mint_ctx = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            MintTo {
+                mint: ctx.accounts.share_mint.to_account_info(),
+                to: ctx.accounts.buyer_shares.to_account_info(),
+                authority: ctx.accounts.asset_state.to_account_info(),
+            },
+        )
+        .with_signer(signer);
+        token_interface::mint_to(mint_ctx, amount)?;
 
         let ts = Clock::get()?.unix_timestamp;
         let asset = &mut ctx.accounts.asset_state;
@@ -138,6 +216,20 @@ pub mod rwa_contracts {
             ctx.accounts.user_state.shares_owned >= amount,
             RwaError::InsufficientFunds
         );
+        require_keys_eq!(
+            ctx.accounts.token_program.key(),
+            anchor_spl::token_2022::ID,
+            RwaError::InvalidTokenProgram
+        );
+        require_keys_eq!(
+            ctx.accounts.asset_state.share_mint,
+            ctx.accounts.share_mint.key(),
+            RwaError::InvalidShareMint
+        );
+        require!(
+            ctx.accounts.user_shares.amount >= amount,
+            RwaError::InsufficientFunds
+        );
 
         let payout = amount
             .checked_mul(SHARE_PRICE_LAMPORTS)
@@ -149,6 +241,16 @@ pub mod rwa_contracts {
             ctx.accounts.asset_state.reserve_pool >= payout,
             RwaError::InsufficientReserve
         );
+
+        let burn_ctx = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            Burn {
+                mint: ctx.accounts.share_mint.to_account_info(),
+                from: ctx.accounts.user_shares.to_account_info(),
+                authority: ctx.accounts.user.to_account_info(),
+            },
+        );
+        token_interface::burn(burn_ctx, amount)?;
 
         move_lamports(
             &ctx.accounts.asset_state.to_account_info(),
@@ -177,12 +279,33 @@ pub mod rwa_contracts {
 }
 
 #[derive(Accounts)]
+pub struct InitializeMarketplace<'info> {
+    #[account(
+        init,
+        payer = admin,
+        space = 8 + MarketplaceState::LEN,
+        seeds = [b"marketplace"],
+        bump
+    )]
+    pub marketplace: Account<'info, MarketplaceState>,
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct InitializeAsset<'info> {
+    #[account(
+        mut,
+        seeds = [b"marketplace"],
+        bump = marketplace.bump
+    )]
+    pub marketplace: Account<'info, MarketplaceState>,
     #[account(
         init,
         payer = admin,
         space = 8 + AssetState::LEN,
-        seeds = [b"asset"],
+        seeds = [b"asset".as_ref(), &marketplace.next_asset_id.to_le_bytes()],
         bump
     )]
     pub asset_state: Account<'info, AssetState>,
@@ -192,11 +315,36 @@ pub struct InitializeAsset<'info> {
 }
 
 #[derive(Accounts)]
+pub struct InitializeShareMint<'info> {
+    #[account(
+        mut,
+        seeds = [b"asset".as_ref(), &asset_state.asset_id.to_le_bytes()],
+        bump = asset_state.bump
+    )]
+    pub asset_state: Account<'info, AssetState>,
+    #[account(
+        init,
+        payer = admin,
+        seeds = [b"share_mint".as_ref(), asset_state.key().as_ref()],
+        bump,
+        mint::decimals = 0,
+        mint::authority = asset_state,
+        mint::freeze_authority = asset_state,
+        mint::token_program = token_program
+    )]
+    pub share_mint: InterfaceAccount<'info, Mint>,
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 #[instruction(wallet: Pubkey)]
 pub struct AddToWhitelist<'info> {
     #[account(
         mut,
-        seeds = [b"asset"],
+        seeds = [b"asset".as_ref(), &asset_state.asset_id.to_le_bytes()],
         bump = asset_state.bump
     )]
     pub asset_state: Account<'info, AssetState>,
@@ -204,7 +352,7 @@ pub struct AddToWhitelist<'info> {
         init,
         payer = admin,
         space = 8 + UserState::LEN,
-        seeds = [b"user", wallet.as_ref()],
+        seeds = [b"user".as_ref(), asset_state.key().as_ref(), wallet.as_ref()],
         bump
     )]
     pub user_state: Account<'info, UserState>,
@@ -217,19 +365,35 @@ pub struct AddToWhitelist<'info> {
 pub struct BuyShares<'info> {
     #[account(
         mut,
-        seeds = [b"asset"],
+        seeds = [b"asset".as_ref(), &asset_state.asset_id.to_le_bytes()],
         bump = asset_state.bump
     )]
     pub asset_state: Account<'info, AssetState>,
     #[account(
         mut,
-        seeds = [b"user", buyer.key().as_ref()],
+        seeds = [b"user".as_ref(), asset_state.key().as_ref(), buyer.key().as_ref()],
         bump = user_state.bump,
         constraint = user_state.wallet == buyer.key()
     )]
     pub user_state: Account<'info, UserState>,
+    #[account(
+        mut,
+        seeds = [b"share_mint".as_ref(), asset_state.key().as_ref()],
+        bump = asset_state.share_mint_bump
+    )]
+    pub share_mint: InterfaceAccount<'info, Mint>,
+    #[account(
+        init_if_needed,
+        payer = buyer,
+        associated_token::mint = share_mint,
+        associated_token::authority = buyer,
+        associated_token::token_program = token_program
+    )]
+    pub buyer_shares: InterfaceAccount<'info, TokenAccount>,
     #[account(mut)]
     pub buyer: Signer<'info>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
 
@@ -237,13 +401,13 @@ pub struct BuyShares<'info> {
 pub struct ClaimYield<'info> {
     #[account(
         mut,
-        seeds = [b"asset"],
+        seeds = [b"asset".as_ref(), &asset_state.asset_id.to_le_bytes()],
         bump = asset_state.bump
     )]
     pub asset_state: Account<'info, AssetState>,
     #[account(
         mut,
-        seeds = [b"user", user.key().as_ref()],
+        seeds = [b"user".as_ref(), asset_state.key().as_ref(), user.key().as_ref()],
         bump = user_state.bump,
         constraint = user_state.wallet == user.key()
     )]
@@ -256,23 +420,46 @@ pub struct ClaimYield<'info> {
 pub struct InstantSell<'info> {
     #[account(
         mut,
-        seeds = [b"asset"],
+        seeds = [b"asset".as_ref(), &asset_state.asset_id.to_le_bytes()],
         bump = asset_state.bump
     )]
     pub asset_state: Account<'info, AssetState>,
     #[account(
         mut,
-        seeds = [b"user", user.key().as_ref()],
+        seeds = [b"user".as_ref(), asset_state.key().as_ref(), user.key().as_ref()],
         bump = user_state.bump,
         constraint = user_state.wallet == user.key()
     )]
     pub user_state: Account<'info, UserState>,
+    #[account(
+        mut,
+        seeds = [b"share_mint".as_ref(), asset_state.key().as_ref()],
+        bump = asset_state.share_mint_bump
+    )]
+    pub share_mint: InterfaceAccount<'info, Mint>,
+    #[account(
+        mut,
+        associated_token::mint = share_mint,
+        associated_token::authority = user,
+        associated_token::token_program = token_program
+    )]
+    pub user_shares: InterfaceAccount<'info, TokenAccount>,
     #[account(mut)]
     pub user: Signer<'info>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+}
+
+#[account]
+pub struct MarketplaceState {
+    pub admin: Pubkey,
+    pub next_asset_id: u64,
+    pub bump: u8,
 }
 
 #[account]
 pub struct AssetState {
+    pub asset_id: u64,
     pub total_shares: u64,
     pub sold_shares: u64,
     pub yield_rate: u64,
@@ -281,7 +468,9 @@ pub struct AssetState {
     pub asset_name: String,
     pub asset_uri: String,
     pub admin: Pubkey,
+    pub share_mint: Pubkey,
     pub bump: u8,
+    pub share_mint_bump: u8,
 }
 
 #[account]
@@ -303,6 +492,16 @@ pub enum RwaError {
     InsufficientReserve,
     #[msg("Admin only")]
     AdminOnly,
+    #[msg("Invalid share mint")]
+    InvalidShareMint,
+    #[msg("Invalid token program")]
+    InvalidTokenProgram,
+}
+
+impl MarketplaceState {
+    pub const LEN: usize = 32
+        + 8
+        + 1;
 }
 
 impl AssetState {
@@ -312,10 +511,13 @@ impl AssetState {
         + 8
         + 8
         + 8
+        + 8
         + 32
         + 4 + Self::MAX_NAME_LEN
         + 4 + Self::MAX_URI_LEN
         + 32
+        + 32
+        + 1
         + 1;
 }
 

@@ -3,36 +3,41 @@
 ## DONE
 - [x] WSL2 + Solana + Anchor 0.32.1 setup
 - [x] anchor init rwa-contracts
+- [x] initialize_marketplace instruction
 - [x] AssetState and UserState PDA structs
 - [x] initialize_asset instruction
+- [x] initialize_share_mint instruction
 - [x] add_to_whitelist instruction
-- [x] buy_shares instruction with whitelist check
+- [x] buy_shares instruction with whitelist check and token mint
 - [x] claim_yield instruction with time-based formula
-- [x] instant_sell instruction with 10% discount
+- [x] instant_sell instruction with 10% discount and token burn
+- [x] Token-2022 share mint per asset
+- [x] Multi-asset marketplace PDA model
+- [x] Store token mint pubkey in AssetState
 - [x] anchor build SUCCESS
-- [x] Write JS tests for all 5 instructions
-- [x] anchor test — all pass
+- [x] Write JS/Anchor tests for marketplace + tokenization flow
+- [x] anchor test - 8 tests passing
 
-## NOW — Real Tokenization
-- [ ] Create Token-2022 share mint
-- [ ] Add mint authority / admin flow for share token
-- [ ] Create investor token account flow
-- [ ] buy_shares -> mint or transfer share tokens to buyer
-- [ ] instant_sell -> return / burn share tokens before payout
-- [ ] Store token mint pubkey in AssetState
-- [ ] Add metadata flow for asset token (name, symbol, uri)
+## NOW — Demo Hardening
+- [ ] Add token metadata flow for each asset share mint
+- [ ] Add admin reserve top-up instruction
+- [ ] Add tests for reserve top-up
 - [ ] Decide whitelist enforcement model:
-- [ ] Option A: program-level checks only
-- [ ] Option B: Token-2022 Transfer Hook / transfer restriction
+- [ ] Option A: current program-level checks only
+- [ ] Option B: Token-2022 transfer hook / transfer restriction
+- [ ] Add negative tests:
+- [ ] non-whitelisted buy should fail
+- [ ] sell without tokens should fail
+- [ ] claim with empty reserve should fail
 
 ## NEXT — Marketplace + Yield
 - [ ] Decide payout asset for demo:
-- [ ] Option A: lamports MVP
-- [ ] Option B: devnet USDC token
-- [ ] Add reserve funding flow for payouts
-- [ ] Add admin top-up instruction for reserve pool
+- [ ] Option A: keep lamports MVP
+- [ ] Option B: switch to devnet USDC token
 - [ ] Prepare 1 real demo asset card for coffee shop in Astana
 - [ ] Verify document hash flow end-to-end
+- [ ] Deploy program to devnet
+- [ ] Create at least one seeded demo asset on devnet
 
 ## AFTER — Frontend
 - [ ] npx create-next-app in app/ folder
@@ -44,7 +49,6 @@
 - [ ] Investor dashboard: balance, accrued yield
 
 ## HACKATHON DEMO
-- [ ] anchor deploy to devnet
 - [ ] Public explorer link
 - [ ] Solana Blink for Telegram (optional)
 - [ ] Record video demo as fallback
