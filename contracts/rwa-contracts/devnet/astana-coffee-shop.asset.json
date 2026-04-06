@@ -1,0 +1,12 @@
+{
+  "assetId": 0,
+  "assetName": "Astana Coffee Shop",
+  "shareSymbol": "ACS",
+  "assetUri": "https://raw.githubusercontent.com/Aste-risk-O/rwa-platform/main/contracts/rwa-contracts/devnet/astana-coffee-shop.metadata.json",
+  "metadataPath": "./astana-coffee-shop.metadata.json",
+  "documentPath": "./documents/astana-coffee-shop.bundle-manifest.json",
+  "totalShares": 1000,
+  "yieldRatePerDay": 86400,
+  "reserveTopUpLamports": 3000000000,
+  "initialWhitelist": []
+}

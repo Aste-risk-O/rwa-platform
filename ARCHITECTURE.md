@@ -188,11 +188,25 @@ Latest local status:
 - asset URI can point to off-chain JSON metadata
 - canonical token metadata is also stored inside the mint via `Token-2022`
 - the mint metadata includes `asset_id` and `document_hash` for cross-checking
+- the repo now includes a demo asset package under `contracts/rwa-contracts/devnet`
 - verifier flow:
   - download source document
   - compute hash
   - compare to on-chain `document_hash`
   - verify the mint metadata points to the same asset package and asset id
+
+## Devnet Demo Package
+
+The repo includes one reproducible demo asset package:
+
+- `astana-coffee-shop.asset.json` - seeding config
+- `astana-coffee-shop.metadata.json` - off-chain metadata file to host publicly later
+- `documents/astana-coffee-shop.bundle-manifest.json` - canonical placeholder document bundle
+
+Supporting JS scripts:
+
+- `yarn seed:devnet` - initializes marketplace, asset, share mint, in-mint metadata, hook config, whitelist entries, and reserve target
+- `yarn verify:devnet` - checks local bundle hash against on-chain `document_hash` and mint metadata fields
 
 ## What Is Not On-Chain
 
@@ -205,8 +219,8 @@ Latest local status:
 
 ## Next Technical Steps
 
-- add token metadata flow for asset share mint
 - deploy to devnet
+- run the first live demo asset seed on devnet
 - optionally switch yield/payout demo from lamports to devnet USDC
 - decide whether to keep transfers blocked or move to full secondary-market accounting
 - build frontend marketplace and wallet flow

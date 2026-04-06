@@ -9,6 +9,7 @@ Current status:
 - `Token-2022` transfer-hook enforcement for direct transfers
 - in-mint `Token-2022` metadata with `MetadataPointer`
 - admin reserve top-up flow
+- devnet seed and verification scripts for a demo asset package
 - buy, yield claim, and instant sell logic
 - full Anchor test suite passing locally
 
@@ -24,6 +25,7 @@ Project focus:
 - `ARCHITECTURE.md` - current system design and on-chain model
 - `TASKS.md` - implementation status and next steps
 - `RULES.md` - project constraints and product intent
+- `contracts/rwa-contracts/devnet` - demo asset package, metadata JSON, and doc bundle manifest
 
 ## Implemented On-Chain Flow
 
@@ -80,6 +82,26 @@ anchor build
 anchor test
 ```
 
+## Devnet Demo Prep
+
+The repo now includes a reproducible devnet asset package for the first demo asset:
+
+- asset config: `contracts/rwa-contracts/devnet/astana-coffee-shop.asset.json`
+- off-chain metadata file: `contracts/rwa-contracts/devnet/astana-coffee-shop.metadata.json`
+- canonical document bundle manifest: `contracts/rwa-contracts/devnet/documents/astana-coffee-shop.bundle-manifest.json`
+
+From `contracts/rwa-contracts`:
+
+```bash
+yarn seed:devnet
+yarn verify:devnet
+```
+
+The verification step compares the local document bundle SHA-256 against:
+
+- on-chain `AssetState.document_hash`
+- in-mint `Token-2022` metadata field `document_hash`
+
 If local validator starts slowly on WSL, `Anchor.toml` already includes:
 
 ```toml
@@ -89,7 +111,6 @@ startup_wait = 20000
 
 ## What Is Still Missing
 
-- devnet deployment
-- seeded demo asset package and canonical docs bundle
+- devnet deployment and first live seed run
 - optional switch from lamports to devnet USDC for demo payouts
 - frontend marketplace UI

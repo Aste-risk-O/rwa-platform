@@ -39,11 +39,13 @@
 - [x] claim with empty reserve should fail
 
 ## NEXT -> Marketplace + Yield
-- [ ] Decide payout asset for demo
-- [ ] Option A: keep lamports MVP
+- [x] Decide payout asset for demo
+- [x] Option A: keep lamports MVP
 - [ ] Option B: switch to devnet USDC token
-- [ ] Prepare 1 real demo asset card for coffee shop in Astana
-- [ ] Verify document hash flow end-to-end
+- [x] Prepare 1 real demo asset package for coffee shop in Astana
+- [x] Verify document hash flow end-to-end
+- [x] Add devnet seed script for marketplace + asset bootstrap
+- [x] Add devnet verification script for on-chain/off-chain asset binding
 - [ ] Deploy programs to devnet
 - [ ] Create at least one seeded demo asset on devnet
 

@@ -1,0 +1,15 @@
+{
+  "assetName": "Astana Coffee Shop",
+  "jurisdiction": "Kazakhstan",
+  "structure": "Revenue-share token demo via SPV placeholder",
+  "verificationChecklist": [
+    "Business registration extract",
+    "Lease agreement",
+    "Bank statement summary",
+    "Cashflow summary",
+    "Photo pack",
+    "Operator KYC placeholder"
+  ],
+  "bundleVersion": 1,
+  "notes": "This manifest is the canonical document bundle placeholder for devnet seeding. Replace it with a real document manifest or a signed PDF bundle before a public demo."
+}

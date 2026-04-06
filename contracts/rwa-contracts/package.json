@@ -1,6 +1,8 @@
 {
   "license": "ISC",  
   "scripts": {
+    "seed:devnet": "node scripts/seed-devnet.js",
+    "verify:devnet": "node scripts/verify-devnet-asset.js",
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
     "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check"
   },
