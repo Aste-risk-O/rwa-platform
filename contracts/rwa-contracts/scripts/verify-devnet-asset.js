@@ -36,7 +36,15 @@ async function main() {
   console.log(`Asset PDA: ${assetState.toBase58()}`);
   console.log(`Expected document hash: ${expectedDocumentHash}`);
 
-  const asset = await rwaProgram.account.assetState.fetch(assetState);
+  const asset = await rwaProgram.account.assetState.fetchNullable(assetState);
+  if (!asset) {
+    throw new Error(
+      [
+        `Asset ${assetState.toBase58()} does not exist on the selected cluster yet.`,
+        "Run anchor deploy, then yarn seed:devnet, and rerun this verification step.",
+      ].join(" ")
+    );
+  }
   const onChainDocumentHash = Buffer.from(asset.documentHash).toString("hex");
   const metadata = await getTokenMetadata(
     provider.connection,

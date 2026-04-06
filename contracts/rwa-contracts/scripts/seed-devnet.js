@@ -11,6 +11,7 @@ const { PublicKey, SystemProgram, Keypair } = anchor.web3;
 const TOKEN_2022_PROGRAM_ID = new PublicKey(
   "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
 );
+const MIN_ADMIN_BALANCE_LAMPORTS = 4_000_000_000;
 
 async function main() {
   const workspaceRoot = path.resolve(__dirname, "..");
@@ -60,6 +61,10 @@ async function main() {
     console.log(`Local metadata file: ${metadataPath}`);
   }
   console.log(`Configured asset URI: ${config.assetUri}`);
+
+  const adminBalance = await provider.connection.getBalance(admin, "confirmed");
+  console.log(`Admin balance: ${adminBalance} lamports`);
+  ensureSufficientBalance(adminBalance);
 
   const marketplaceState = await rwaProgram.account.marketplaceState.fetchNullable(
     marketplace
@@ -273,6 +278,22 @@ function validateConfig(config, configPath) {
       throw new Error(`Metadata file does not exist: ${metadataPath}`);
     }
   }
+}
+
+function ensureSufficientBalance(balanceLamports) {
+  if (balanceLamports >= MIN_ADMIN_BALANCE_LAMPORTS) {
+    return;
+  }
+
+  const neededSol = (MIN_ADMIN_BALANCE_LAMPORTS / 1_000_000_000).toFixed(2);
+  const currentSol = (balanceLamports / 1_000_000_000).toFixed(4);
+  throw new Error(
+    [
+      `Admin wallet has only ${currentSol} SOL on the selected cluster.`,
+      `Seeding this demo safely expects about ${neededSol} SOL to cover program interactions and reserve top-up.`,
+      "Fund the wallet first, then rerun yarn seed:devnet.",
+    ].join(" ")
+  );
 }
 
 async function fetchMarketplaceNextId(program, marketplace) {
