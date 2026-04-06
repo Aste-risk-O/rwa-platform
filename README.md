@@ -7,6 +7,8 @@ Current status:
 - per-asset `Token-2022` share mint
 - whitelist-based investing flow
 - `Token-2022` transfer-hook enforcement for direct transfers
+- in-mint `Token-2022` metadata with `MetadataPointer`
+- admin reserve top-up flow
 - buy, yield claim, and instant sell logic
 - full Anchor test suite passing locally
 
@@ -29,11 +31,13 @@ Marketplace program:
 1. `initialize_marketplace` creates marketplace state with admin and `next_asset_id`
 2. `initialize_asset` creates a new asset PDA for the marketplace
 3. `initialize_share_mint` creates a `Token-2022` mint for that asset
-4. `add_to_whitelist` creates investor state for a wallet and asset
-5. `set_whitelist_status` lets admin explicitly allow or block a wallet
-6. `buy_shares` transfers SOL to the asset reserve and mints share tokens
-7. `claim_yield` pays accrued yield from the reserve pool
-8. `instant_sell` burns share tokens and pays back 90% of share price
+4. `initialize_share_metadata` writes canonical metadata into the mint itself
+5. `add_to_whitelist` creates investor state for a wallet and asset
+6. `set_whitelist_status` lets admin explicitly allow or block a wallet
+7. `reserve_top_up` lets admin inject reserve liquidity into an asset
+8. `buy_shares` transfers SOL to the asset reserve and mints share tokens
+9. `claim_yield` pays accrued yield from the reserve pool
+10. `instant_sell` burns share tokens and pays back 90% of share price
 
 Transfer-hook program:
 1. `configure_asset_hook` creates the validation PDA for a share mint
@@ -50,18 +54,21 @@ The Anchor test suite currently covers:
 - marketplace initialization
 - asset creation
 - share mint creation
+- canonical in-mint metadata initialization
 - transfer-hook metadata setup
 - whitelist flow
 - explicit blocked-wallet state
+- reserve top-up
 - token mint on buy
 - yield accrual and payout
 - token burn on instant sell
+- negative tests for buy/sell/claim failure branches
 - transfer rejection for non-whitelisted recipient
 - transfer rejection for direct secondary movement
 - creation of a second marketplace asset
 
 Latest local result:
-- `13 passing`
+- `18 passing`
 
 ## Local Run
 
@@ -82,8 +89,7 @@ startup_wait = 20000
 
 ## What Is Still Missing
 
-- token metadata for marketplace display
-- reserve top-up instruction for admin
 - devnet deployment
-- frontend marketplace UI
+- seeded demo asset package and canonical docs bundle
 - optional switch from lamports to devnet USDC for demo payouts
+- frontend marketplace UI

@@ -31,11 +31,13 @@ Implemented marketplace instructions:
 1. `initialize_marketplace`
 2. `initialize_asset`
 3. `initialize_share_mint`
-4. `add_to_whitelist`
-5. `set_whitelist_status`
-6. `buy_shares`
-7. `claim_yield`
-8. `instant_sell`
+4. `initialize_share_metadata`
+5. `add_to_whitelist`
+6. `set_whitelist_status`
+7. `reserve_top_up`
+8. `buy_shares`
+9. `claim_yield`
+10. `instant_sell`
 
 Implemented hook-program instructions:
 1. `configure_asset_hook`
@@ -79,6 +81,8 @@ Economic model today:
 - decimals: `0`
 - mint authority: `asset_state` PDA
 - transfer hook program: `rwa-transfer-hook`
+- metadata pointer: points to the mint itself
+- canonical metadata: stored directly in the mint TLV data
 
 `ExtraAccountMetaList`
 - seeds: `["extra-account-metas", share_mint]`
@@ -101,7 +105,18 @@ Economic model today:
 `initialize_share_mint`
 - creates one `Token-2022` mint for the asset
 - initializes the mint with the `TransferHook` extension
+- initializes the mint with the `MetadataPointer` extension
 - stores mint pubkey in `AssetState`
+
+`initialize_share_metadata`
+- writes canonical `Token-2022` metadata directly into the mint
+- uses the asset PDA as mint authority for initialization
+- stores:
+  - `name = "{asset_name} Shares"`
+  - `symbol`
+  - `uri = asset_uri`
+  - `asset_id` in additional metadata
+  - `document_hash` in additional metadata
 
 `add_to_whitelist`
 - creates per-user per-asset investor state
@@ -110,6 +125,11 @@ Economic model today:
 - admin-only helper for explicit allow/deny state
 - can initialize a `UserState` PDA with `is_whitelisted = false`
 - useful for compliance-driven negative tests and future admin tooling
+
+`reserve_top_up`
+- admin-only reserve injection
+- transfers SOL from admin wallet to the asset PDA
+- increases `reserve_pool` without changing token supply
 
 `buy_shares`
 - checks whitelist status
@@ -145,28 +165,34 @@ Current Anchor tests cover:
 - marketplace initialization
 - asset creation
 - share mint creation
+- in-mint metadata initialization
 - transfer-hook metadata account creation
 - whitelist creation
 - explicit blocked-wallet state via `set_whitelist_status`
+- reserve top-up accounting
 - token minting on purchase
 - yield accrual and payout
 - token burn on sell
+- negative tests for non-whitelisted buy, zero-share sell, and insufficient reserve claim
 - direct transfer rejection for non-whitelisted recipient
 - direct secondary transfer rejection for whitelisted recipient
 - second asset creation in the same marketplace
 
 Latest local status:
-- `anchor test` -> `13 passing`
+- `anchor test` -> `18 passing`
 
 ## Asset Binding
 
 - off-chain legal or commercial document is hashed with SHA-256
 - hash is stored in `AssetState.document_hash`
 - asset URI can point to off-chain JSON metadata
+- canonical token metadata is also stored inside the mint via `Token-2022`
+- the mint metadata includes `asset_id` and `document_hash` for cross-checking
 - verifier flow:
   - download source document
   - compute hash
-  - compare to on-chain value
+  - compare to on-chain `document_hash`
+  - verify the mint metadata points to the same asset package and asset id
 
 ## What Is Not On-Chain
 
@@ -180,8 +206,6 @@ Latest local status:
 ## Next Technical Steps
 
 - add token metadata flow for asset share mint
-- add explicit admin reserve top-up instruction
-- add negative tests for buy/sell/claim failure branches
 - deploy to devnet
 - optionally switch yield/payout demo from lamports to devnet USDC
 - decide whether to keep transfers blocked or move to full secondary-market accounting

@@ -11,15 +11,32 @@ use anchor_spl::{
     token_interface::{self, Burn, Mint, MintTo, TokenAccount, TokenInterface},
 };
 use spl_token_2022::{
+    extension::metadata_pointer::instruction as metadata_pointer_instruction,
     extension::transfer_hook::instruction as transfer_hook_instruction,
     instruction as token_2022_instruction,
+};
+use spl_token_metadata_interface::{
+    instruction as token_metadata_instruction,
+    state::Field as TokenMetadataField,
 };
 
 declare_id!("AH6kQ9Uz3Pzizt7hLwjpKhTFRCK5yS3pMjHSVAAaGasB");
 
 const SHARE_PRICE_LAMPORTS: u64 = 1_000_000_000;
 const SECONDS_PER_DAY: u64 = 86_400;
-const SHARE_MINT_LEN_WITH_TRANSFER_HOOK: usize = 234;
+// Supports:
+// - TransferHook extension
+// - MetadataPointer extension
+const SHARE_MINT_BASE_ACCOUNT_LEN: usize = 302;
+// Overfund mint rent up front so Token-2022 can later grow the account during
+// metadata initialization without requiring a second payer transfer.
+// Sized for in-mint TokenMetadata entry with:
+//   * name <= 135 chars
+//   * symbol <= 16 chars
+//   * uri <= 256 chars
+//   * additional fields: asset_id, document_hash
+const SHARE_MINT_ACCOUNT_MAX_LEN: usize = 914;
+const SHARE_METADATA_SYMBOL_MAX_LEN: usize = 16;
 pub const RWA_TRANSFER_HOOK_ID: Pubkey = pubkey!("46Qyj9daA4R3gRuEJzVCDuJX43An4oz4PsdzUXjV3sG8");
 
 #[program]
@@ -99,7 +116,7 @@ pub mod rwa_contracts {
 
         // The mint must be allocated with enough space for the TransferHook
         // extension before Token-2022 initialization runs.
-        let rent_lamports = Rent::get()?.minimum_balance(SHARE_MINT_LEN_WITH_TRANSFER_HOOK);
+        let rent_lamports = Rent::get()?.minimum_balance(SHARE_MINT_ACCOUNT_MAX_LEN);
         let asset_state_key = ctx.accounts.asset_state.key();
         let signer_seeds: &[&[u8]] = &[
             b"share_mint".as_ref(),
@@ -112,7 +129,7 @@ pub mod rwa_contracts {
                 &ctx.accounts.admin.key(),
                 &ctx.accounts.share_mint.key(),
                 rent_lamports,
-                SHARE_MINT_LEN_WITH_TRANSFER_HOOK as u64,
+                SHARE_MINT_BASE_ACCOUNT_LEN as u64,
                 &ctx.accounts.token_program.key(),
             ),
             &[
@@ -137,6 +154,19 @@ pub mod rwa_contracts {
         )?;
 
         invoke(
+            &metadata_pointer_instruction::initialize(
+                &ctx.accounts.token_program.key(),
+                &ctx.accounts.share_mint.key(),
+                Some(ctx.accounts.admin.key()),
+                Some(ctx.accounts.share_mint.key()),
+            )?,
+            &[
+                ctx.accounts.share_mint.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+            ],
+        )?;
+
+        invoke(
             &token_2022_instruction::initialize_mint2(
                 &ctx.accounts.token_program.key(),
                 &ctx.accounts.share_mint.key(),
@@ -153,6 +183,90 @@ pub mod rwa_contracts {
         let acc = &mut ctx.accounts.asset_state;
         acc.share_mint = ctx.accounts.share_mint.key();
         acc.share_mint_bump = ctx.bumps.share_mint;
+
+        Ok(())
+    }
+
+    pub fn initialize_share_metadata(
+        ctx: Context<InitializeShareMetadata>,
+        symbol: String,
+    ) -> Result<()> {
+        require_keys_eq!(
+            ctx.accounts.admin.key(),
+            ctx.accounts.asset_state.admin,
+            RwaError::AdminOnly
+        );
+        require_keys_eq!(
+            ctx.accounts.token_program.key(),
+            anchor_spl::token_2022::ID,
+            RwaError::InvalidTokenProgram
+        );
+        require_keys_eq!(
+            ctx.accounts.asset_state.share_mint,
+            ctx.accounts.share_mint.key(),
+            RwaError::InvalidShareMint
+        );
+        require!(
+            !symbol.is_empty() && symbol.len() <= SHARE_METADATA_SYMBOL_MAX_LEN,
+            RwaError::InvalidMetadataSymbol
+        );
+
+        let asset = &ctx.accounts.asset_state;
+        let metadata_name = format!("{} Shares", asset.asset_name);
+        let asset_signer_seeds: &[&[u8]] = &[
+            b"asset".as_ref(),
+            &asset.asset_id.to_le_bytes(),
+            &[asset.bump],
+        ];
+        let asset_signer = &[asset_signer_seeds];
+
+        invoke_signed(
+            &token_metadata_instruction::initialize(
+                &ctx.accounts.token_program.key(),
+                &ctx.accounts.share_mint.key(),
+                &ctx.accounts.admin.key(),
+                &ctx.accounts.share_mint.key(),
+                &ctx.accounts.asset_state.key(),
+                metadata_name,
+                symbol,
+                asset.asset_uri.clone(),
+            ),
+            &[
+                ctx.accounts.share_mint.to_account_info(),
+                ctx.accounts.admin.to_account_info(),
+                ctx.accounts.share_mint.to_account_info(),
+                ctx.accounts.asset_state.to_account_info(),
+            ],
+            asset_signer,
+        )?;
+
+        invoke(
+            &token_metadata_instruction::update_field(
+                &ctx.accounts.token_program.key(),
+                &ctx.accounts.share_mint.key(),
+                &ctx.accounts.admin.key(),
+                TokenMetadataField::Key("asset_id".to_string()),
+                asset.asset_id.to_string(),
+            ),
+            &[
+                ctx.accounts.share_mint.to_account_info(),
+                ctx.accounts.admin.to_account_info(),
+            ],
+        )?;
+
+        invoke(
+            &token_metadata_instruction::update_field(
+                &ctx.accounts.token_program.key(),
+                &ctx.accounts.share_mint.key(),
+                &ctx.accounts.admin.key(),
+                TokenMetadataField::Key("document_hash".to_string()),
+                bytes_to_hex(&asset.document_hash),
+            ),
+            &[
+                ctx.accounts.share_mint.to_account_info(),
+                ctx.accounts.admin.to_account_info(),
+            ],
+        )?;
 
         Ok(())
     }
@@ -198,6 +312,31 @@ pub mod rwa_contracts {
         }
 
         acc.is_whitelisted = is_whitelisted;
+
+        Ok(())
+    }
+
+    pub fn reserve_top_up(ctx: Context<ReserveTopUp>, amount: u64) -> Result<()> {
+        require_keys_eq!(
+            ctx.accounts.admin.key(),
+            ctx.accounts.asset_state.admin,
+            RwaError::AdminOnly
+        );
+
+        let pay_ctx = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.admin.to_account_info(),
+                to: ctx.accounts.asset_state.to_account_info(),
+            },
+        );
+        system_program::transfer(pay_ctx, amount)?;
+
+        let asset = &mut ctx.accounts.asset_state;
+        asset.reserve_pool = asset
+            .reserve_pool
+            .checked_add(amount)
+            .ok_or(RwaError::InsufficientReserve)?;
 
         Ok(())
     }
@@ -461,6 +600,25 @@ pub struct AddToWhitelist<'info> {
 }
 
 #[derive(Accounts)]
+pub struct InitializeShareMetadata<'info> {
+    #[account(
+        mut,
+        seeds = [b"asset".as_ref(), &asset_state.asset_id.to_le_bytes()],
+        bump = asset_state.bump
+    )]
+    pub asset_state: Account<'info, AssetState>,
+    #[account(
+        mut,
+        seeds = [b"share_mint".as_ref(), asset_state.key().as_ref()],
+        bump = asset_state.share_mint_bump
+    )]
+    pub share_mint: InterfaceAccount<'info, Mint>,
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
+#[derive(Accounts)]
 pub struct BuyShares<'info> {
     #[account(
         mut,
@@ -493,6 +651,19 @@ pub struct BuyShares<'info> {
     pub buyer: Signer<'info>,
     pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ReserveTopUp<'info> {
+    #[account(
+        mut,
+        seeds = [b"asset".as_ref(), &asset_state.asset_id.to_le_bytes()],
+        bump = asset_state.bump
+    )]
+    pub asset_state: Account<'info, AssetState>,
+    #[account(mut)]
+    pub admin: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -623,6 +794,8 @@ pub enum RwaError {
     ShareMintAlreadyInitialized,
     #[msg("Invalid user state")]
     InvalidUserState,
+    #[msg("Invalid metadata symbol")]
+    InvalidMetadataSymbol,
 }
 
 impl MarketplaceState {
@@ -672,4 +845,16 @@ fn move_lamports(from: &AccountInfo<'_>, to: &AccountInfo<'_>, amt: u64) -> Resu
     **to.try_borrow_mut_lamports()? = next_to;
 
     Ok(())
+}
+
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+
+    for &byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+
+    out
 }

@@ -7,7 +7,9 @@ import {
   createTransferCheckedWithTransferHookInstruction,
   getExtraAccountMetaAddress,
   getAssociatedTokenAddressSync,
+  getMetadataPointerState,
   getMint,
+  getTokenMetadata,
   getTransferHook,
   TOKEN_2022_PROGRAM_ID,
 } from "@solana/spl-token";
@@ -17,15 +19,20 @@ import { RwaTransferHook } from "../target/types/rwa_transfer_hook";
 const { Keypair, PublicKey, SystemProgram, LAMPORTS_PER_SOL } = anchor.web3;
 
 const SHARE_PRICE_LAMPORTS = 1_000_000_000;
+const TOP_UP_AMOUNT = new anchor.BN(3_000_000_000);
 const TOTAL_SHARES = new anchor.BN(1_000);
 const YIELD_RATE = new anchor.BN(86_400);
+const HIGH_RISK_YIELD_RATE = new anchor.BN("100000000000000");
 const BUY_AMOUNT = new anchor.BN(2);
 const SELL_AMOUNT = new anchor.BN(1);
 const DOC_HASH = Array.from({ length: 32 }, (_, i) => i + 1);
 const ASSET_NAME = "Astana Coffee Shop";
 const ASSET_URI = "https://example.com/assets/astana-coffee-shop.json";
+const SHARE_SYMBOL = "ACS";
 const SECOND_ASSET_NAME = "Astana Bakery";
 const SECOND_ASSET_URI = "https://example.com/assets/astana-bakery.json";
+const THIRD_ASSET_NAME = "Astana Kiosk";
+const THIRD_ASSET_URI = "https://example.com/assets/astana-kiosk.json";
 
 describe("rwa-contracts", () => {
   const provider = anchor.AnchorProvider.env();
@@ -45,7 +52,9 @@ describe("rwa-contracts", () => {
   );
   const asset0 = assetPda(program.programId, 0);
   const asset1 = assetPda(program.programId, 1);
+  const asset2 = assetPda(program.programId, 2);
   const shareMint0 = shareMintPda(program.programId, asset0);
+  const shareMint2 = shareMintPda(program.programId, asset2);
   const extraAccountMetaList0 = getExtraAccountMetaAddress(
     shareMint0,
     hookProgram.programId
@@ -60,8 +69,16 @@ describe("rwa-contracts", () => {
   );
   const recipientUserState0 = userPda(program.programId, asset0, recipient.publicKey);
   const outsiderUserState0 = userPda(program.programId, asset0, outsider.publicKey);
+  const recipientUserState2 = userPda(program.programId, asset2, recipient.publicKey);
   const recipientShares0 = getAssociatedTokenAddressSync(
     shareMint0,
+    recipient.publicKey,
+    false,
+    TOKEN_2022_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  );
+  const recipientShares2 = getAssociatedTokenAddressSync(
+    shareMint2,
     recipient.publicKey,
     false,
     TOKEN_2022_PROGRAM_ID,
@@ -143,11 +160,42 @@ describe("rwa-contracts", () => {
     const asset = (await program.account.assetState.fetch(asset0)) as any;
     const mint = await waitForMint(shareMint0);
     const transferHook = getTransferHook(mint);
+    const metadataPointer = getMetadataPointerState(mint);
     const supply = await provider.connection.getTokenSupply(shareMint0);
 
     expect(asset.shareMint.toBase58()).to.eq(shareMint0.toBase58());
     expect(transferHook?.programId.toBase58()).to.eq(hookProgram.programId.toBase58());
+    expect(metadataPointer?.metadataAddress?.toBase58()).to.eq(shareMint0.toBase58());
     expect(supply.value.amount).to.eq("0");
+  });
+
+  it("initialize_share_metadata stores canonical Token-2022 metadata inside the mint", async () => {
+    await program.methods
+      .initializeShareMetadata(SHARE_SYMBOL)
+      .accounts({
+        assetState: asset0,
+        shareMint: shareMint0,
+        admin: admin.publicKey,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+      })
+      .signers([admin])
+      .rpc();
+
+    const metadata = await waitForMetadata(shareMint0);
+
+    expect(metadata).to.not.eq(null);
+    expect(metadata?.mint.toBase58()).to.eq(shareMint0.toBase58());
+    expect(metadata?.name).to.eq(`${ASSET_NAME} Shares`);
+    expect(metadata?.symbol).to.eq(SHARE_SYMBOL);
+    expect(metadata?.uri).to.eq(ASSET_URI);
+    expect(metadata?.additionalMetadata).to.deep.include([
+      "asset_id",
+      "0",
+    ]);
+    expect(metadata?.additionalMetadata).to.deep.include([
+      "document_hash",
+      bytesToHex(DOC_HASH),
+    ]);
   });
 
   it("configure_asset_hook writes the validation PDA for transfer-hook account resolution", async () => {
@@ -219,6 +267,49 @@ describe("rwa-contracts", () => {
 
     const user = (await program.account.userState.fetch(outsiderUserState0)) as any;
     expect(user.isWhitelisted).to.eq(false);
+  });
+
+  it("reserve_top_up increases reserve_pool and the asset lamport balance", async () => {
+    const beforeAsset = (await program.account.assetState.fetch(asset0)) as any;
+    const beforeLamports = await provider.connection.getBalance(asset0);
+
+    await program.methods
+      .reserveTopUp(TOP_UP_AMOUNT)
+      .accounts({
+        assetState: asset0,
+        admin: admin.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([admin])
+      .rpc();
+
+    const afterAsset = (await program.account.assetState.fetch(asset0)) as any;
+    const afterLamports = await provider.connection.getBalance(asset0);
+
+    expect(afterAsset.reservePool.toString()).to.eq(
+      beforeAsset.reservePool.add(TOP_UP_AMOUNT).toString()
+    );
+    expect(afterLamports - beforeLamports).to.eq(TOP_UP_AMOUNT.toNumber());
+  });
+
+  it("buy_shares rejects a wallet that has an explicit non-whitelisted state", async () => {
+    await expectRpcFailure(
+      program.methods
+        .buyShares(new anchor.BN(1))
+        .accounts({
+          assetState: asset0,
+          userState: outsiderUserState0,
+          shareMint: shareMint0,
+          buyerShares: outsiderShares0,
+          buyer: outsider.publicKey,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([outsider])
+        .rpc(),
+      "Wallet is not whitelisted"
+    );
   });
 
   it("buy_shares increases shares_owned, reserve_pool, and token balance", async () => {
@@ -360,6 +451,27 @@ describe("rwa-contracts", () => {
     );
   });
 
+  it("instant_sell rejects a whitelisted wallet that does not own any shares", async () => {
+    await ensureAta(recipient.publicKey, recipientShares0, shareMint0);
+
+    await expectRpcFailure(
+      program.methods
+        .instantSell(new anchor.BN(1))
+        .accounts({
+          assetState: asset0,
+          userState: recipientUserState0,
+          shareMint: shareMint0,
+          userShares: recipientShares0,
+          user: recipient.publicKey,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        })
+        .signers([recipient])
+        .rpc(),
+      "Insufficient funds"
+    );
+  });
+
   it("transfer hook rejects direct transfers to a non-whitelisted recipient", async () => {
     await ensureAta(outsider.publicKey, outsiderShares0);
 
@@ -428,6 +540,79 @@ describe("rwa-contracts", () => {
     expect(state.nextAssetId.toString()).to.eq("2");
   });
 
+  it("claim_yield rejects when accrued yield is larger than the reserve pool", async () => {
+    await program.methods
+      .initializeAsset(
+        new anchor.BN(10),
+        HIGH_RISK_YIELD_RATE,
+        DOC_HASH.map((v) => (v + 7) % 256),
+        THIRD_ASSET_NAME,
+        THIRD_ASSET_URI
+      )
+      .accounts({
+        marketplace,
+        assetState: asset2,
+        admin: admin.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([admin])
+      .rpc();
+
+    await program.methods
+      .initializeShareMint()
+      .accounts({
+        assetState: asset2,
+        shareMint: shareMint2,
+        admin: admin.publicKey,
+        transferHookProgram: hookProgram.programId,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([admin])
+      .rpc();
+
+    await program.methods
+      .addToWhitelist(recipient.publicKey)
+      .accounts({
+        assetState: asset2,
+        userState: recipientUserState2,
+        admin: admin.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([admin])
+      .rpc();
+
+    await program.methods
+      .buyShares(new anchor.BN(1))
+      .accounts({
+        assetState: asset2,
+        userState: recipientUserState2,
+        shareMint: shareMint2,
+        buyerShares: recipientShares2,
+        buyer: recipient.publicKey,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([recipient])
+      .rpc();
+
+    await sleep(1_200);
+
+    await expectRpcFailure(
+      program.methods
+        .claimYield()
+        .accounts({
+          assetState: asset2,
+          userState: recipientUserState2,
+          user: recipient.publicKey,
+        })
+        .signers([recipient])
+        .rpc(),
+      "Insufficient reserve"
+    );
+  });
+
   async function airdrop(pubkey: anchor.web3.PublicKey, lamports: number) {
     const sig = await provider.connection.requestAirdrop(pubkey, lamports);
 
@@ -458,7 +643,26 @@ describe("rwa-contracts", () => {
     throw lastError;
   }
 
-  async function ensureAta(owner: PublicKey, ata: PublicKey) {
+  async function waitForMetadata(mint: PublicKey) {
+    for (let i = 0; i < 10; i += 1) {
+      const metadata = await getTokenMetadata(
+        provider.connection,
+        mint,
+        "confirmed",
+        TOKEN_2022_PROGRAM_ID
+      );
+
+      if (metadata) {
+        return metadata;
+      }
+
+      await sleep(300);
+    }
+
+    return null;
+  }
+
+  async function ensureAta(owner: PublicKey, ata: PublicKey, mint = shareMint0) {
     const info = await provider.connection.getAccountInfo(ata);
     if (info) {
       return;
@@ -468,7 +672,7 @@ describe("rwa-contracts", () => {
       admin.publicKey,
       ata,
       owner,
-      shareMint0,
+      mint,
       TOKEN_2022_PROGRAM_ID,
       ASSOCIATED_TOKEN_PROGRAM_ID
     );
@@ -515,8 +719,12 @@ function userPda(programId: PublicKey, asset: PublicKey, wallet: PublicKey) {
   )[0];
 }
 
-function u64le(n: number) {
+  function u64le(n: number) {
   const buf = Buffer.alloc(8);
   buf.writeBigUInt64LE(BigInt(n));
   return buf;
+}
+
+function bytesToHex(bytes: number[]) {
+  return bytes.map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
