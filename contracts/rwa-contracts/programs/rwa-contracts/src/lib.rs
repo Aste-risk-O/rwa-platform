@@ -1,16 +1,26 @@
 use anchor_lang::{
     prelude::*,
+    solana_program::{
+        program::{invoke, invoke_signed},
+        system_instruction,
+    },
     system_program::{self, Transfer},
 };
 use anchor_spl::{
     associated_token::AssociatedToken,
     token_interface::{self, Burn, Mint, MintTo, TokenAccount, TokenInterface},
 };
+use spl_token_2022::{
+    extension::transfer_hook::instruction as transfer_hook_instruction,
+    instruction as token_2022_instruction,
+};
 
 declare_id!("AH6kQ9Uz3Pzizt7hLwjpKhTFRCK5yS3pMjHSVAAaGasB");
 
 const SHARE_PRICE_LAMPORTS: u64 = 1_000_000_000;
 const SECONDS_PER_DAY: u64 = 86_400;
+const SHARE_MINT_LEN_WITH_TRANSFER_HOOK: usize = 234;
+pub const RWA_TRANSFER_HOOK_ID: Pubkey = pubkey!("46Qyj9daA4R3gRuEJzVCDuJX43An4oz4PsdzUXjV3sG8");
 
 #[program]
 pub mod rwa_contracts {
@@ -77,9 +87,70 @@ pub mod rwa_contracts {
             anchor_spl::token_2022::ID,
             RwaError::InvalidTokenProgram
         );
+        require_keys_eq!(
+            ctx.accounts.transfer_hook_program.key(),
+            RWA_TRANSFER_HOOK_ID,
+            RwaError::InvalidTransferHookProgram
+        );
+        require!(
+            ctx.accounts.share_mint.lamports() == 0,
+            RwaError::ShareMintAlreadyInitialized
+        );
+
+        // The mint must be allocated with enough space for the TransferHook
+        // extension before Token-2022 initialization runs.
+        let rent_lamports = Rent::get()?.minimum_balance(SHARE_MINT_LEN_WITH_TRANSFER_HOOK);
+        let asset_state_key = ctx.accounts.asset_state.key();
+        let signer_seeds: &[&[u8]] = &[
+            b"share_mint".as_ref(),
+            asset_state_key.as_ref(),
+            &[ctx.bumps.share_mint],
+        ];
+
+        invoke_signed(
+            &system_instruction::create_account(
+                &ctx.accounts.admin.key(),
+                &ctx.accounts.share_mint.key(),
+                rent_lamports,
+                SHARE_MINT_LEN_WITH_TRANSFER_HOOK as u64,
+                &ctx.accounts.token_program.key(),
+            ),
+            &[
+                ctx.accounts.admin.to_account_info(),
+                ctx.accounts.share_mint.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+            ],
+            &[signer_seeds],
+        )?;
+
+        invoke(
+            &transfer_hook_instruction::initialize(
+                &ctx.accounts.token_program.key(),
+                &ctx.accounts.share_mint.key(),
+                Some(ctx.accounts.admin.key()),
+                Some(ctx.accounts.transfer_hook_program.key()),
+            )?,
+            &[
+                ctx.accounts.share_mint.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+            ],
+        )?;
+
+        invoke(
+            &token_2022_instruction::initialize_mint2(
+                &ctx.accounts.token_program.key(),
+                &ctx.accounts.share_mint.key(),
+                &ctx.accounts.asset_state.key(),
+                Some(&ctx.accounts.asset_state.key()),
+                0,
+            )?,
+            &[
+                ctx.accounts.share_mint.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+            ],
+        )?;
 
         let acc = &mut ctx.accounts.asset_state;
-
         acc.share_mint = ctx.accounts.share_mint.key();
         acc.share_mint_bump = ctx.bumps.share_mint;
 
@@ -100,6 +171,33 @@ pub mod rwa_contracts {
         acc.last_claim_timestamp = 0;
         acc.is_whitelisted = true;
         acc.bump = ctx.bumps.user_state;
+
+        Ok(())
+    }
+
+    pub fn set_whitelist_status(
+        ctx: Context<SetWhitelistStatus>,
+        wallet: Pubkey,
+        is_whitelisted: bool,
+    ) -> Result<()> {
+        require_keys_eq!(
+            ctx.accounts.admin.key(),
+            ctx.accounts.asset_state.admin,
+            RwaError::AdminOnly
+        );
+
+        let acc = &mut ctx.accounts.user_state;
+
+        if acc.wallet == Pubkey::default() {
+            acc.wallet = wallet;
+            acc.shares_owned = 0;
+            acc.last_claim_timestamp = 0;
+            acc.bump = ctx.bumps.user_state;
+        } else {
+            require_keys_eq!(acc.wallet, wallet, RwaError::InvalidUserState);
+        }
+
+        acc.is_whitelisted = is_whitelisted;
 
         Ok(())
     }
@@ -322,19 +420,20 @@ pub struct InitializeShareMint<'info> {
         bump = asset_state.bump
     )]
     pub asset_state: Account<'info, AssetState>,
+    /// CHECK: The account is created and initialized manually to allocate
+    /// enough bytes for Token-2022 extensions.
     #[account(
-        init,
-        payer = admin,
+        mut,
         seeds = [b"share_mint".as_ref(), asset_state.key().as_ref()],
-        bump,
-        mint::decimals = 0,
-        mint::authority = asset_state,
-        mint::freeze_authority = asset_state,
-        mint::token_program = token_program
+        bump
     )]
-    pub share_mint: InterfaceAccount<'info, Mint>,
+    pub share_mint: UncheckedAccount<'info>,
     #[account(mut)]
     pub admin: Signer<'info>,
+    /// CHECK: This must be the deployed transfer-hook program used by every
+    /// share mint in the marketplace.
+    #[account(address = RWA_TRANSFER_HOOK_ID)]
+    pub transfer_hook_program: UncheckedAccount<'info>,
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
 }
@@ -394,6 +493,28 @@ pub struct BuyShares<'info> {
     pub buyer: Signer<'info>,
     pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(wallet: Pubkey)]
+pub struct SetWhitelistStatus<'info> {
+    #[account(
+        mut,
+        seeds = [b"asset".as_ref(), &asset_state.asset_id.to_le_bytes()],
+        bump = asset_state.bump
+    )]
+    pub asset_state: Account<'info, AssetState>,
+    #[account(
+        init_if_needed,
+        payer = admin,
+        space = 8 + UserState::LEN,
+        seeds = [b"user".as_ref(), asset_state.key().as_ref(), wallet.as_ref()],
+        bump
+    )]
+    pub user_state: Account<'info, UserState>,
+    #[account(mut)]
+    pub admin: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -496,6 +617,12 @@ pub enum RwaError {
     InvalidShareMint,
     #[msg("Invalid token program")]
     InvalidTokenProgram,
+    #[msg("Invalid transfer hook program")]
+    InvalidTransferHookProgram,
+    #[msg("Share mint is already initialized")]
+    ShareMintAlreadyInitialized,
+    #[msg("Invalid user state")]
+    InvalidUserState,
 }
 
 impl MarketplaceState {

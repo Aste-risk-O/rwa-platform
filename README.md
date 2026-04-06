@@ -6,31 +6,43 @@ Current status:
 - multi-asset marketplace on Solana
 - per-asset `Token-2022` share mint
 - whitelist-based investing flow
+- `Token-2022` transfer-hook enforcement for direct transfers
 - buy, yield claim, and instant sell logic
 - full Anchor test suite passing locally
 
 Project focus:
 - demo marketplace for tokenized revenue-share assets
 - first demo asset: Astana coffee shop
-- payments/yield are currently in native SOL lamports
+- payments and yield are currently in native SOL lamports
 - share ownership is represented by `Token-2022` tokens
 
 ## Repo Layout
 
-- `contracts/rwa-contracts` - Anchor program, IDL, tests, JS deps
+- `contracts/rwa-contracts` - Anchor programs, IDLs, tests, JS deps
 - `ARCHITECTURE.md` - current system design and on-chain model
 - `TASKS.md` - implementation status and next steps
 - `RULES.md` - project constraints and product intent
 
 ## Implemented On-Chain Flow
 
+Marketplace program:
 1. `initialize_marketplace` creates marketplace state with admin and `next_asset_id`
 2. `initialize_asset` creates a new asset PDA for the marketplace
 3. `initialize_share_mint` creates a `Token-2022` mint for that asset
 4. `add_to_whitelist` creates investor state for a wallet and asset
-5. `buy_shares` transfers SOL to the asset reserve and mints share tokens
-6. `claim_yield` pays accrued yield from the reserve pool
-7. `instant_sell` burns share tokens and pays back 90% of share price
+5. `set_whitelist_status` lets admin explicitly allow or block a wallet
+6. `buy_shares` transfers SOL to the asset reserve and mints share tokens
+7. `claim_yield` pays accrued yield from the reserve pool
+8. `instant_sell` burns share tokens and pays back 90% of share price
+
+Transfer-hook program:
+1. `configure_asset_hook` creates the validation PDA for a share mint
+2. `execute` enforces token-level transfer restrictions on every direct transfer
+
+Current token-level compliance behavior:
+- non-whitelisted recipients are rejected on direct transfer
+- direct secondary transfers are currently blocked even for whitelisted users
+- this keeps token balances from drifting away from marketplace entitlement accounting
 
 ## Test Status
 
@@ -38,14 +50,18 @@ The Anchor test suite currently covers:
 - marketplace initialization
 - asset creation
 - share mint creation
+- transfer-hook metadata setup
 - whitelist flow
+- explicit blocked-wallet state
 - token mint on buy
 - yield accrual and payout
 - token burn on instant sell
+- transfer rejection for non-whitelisted recipient
+- transfer rejection for direct secondary movement
 - creation of a second marketplace asset
 
 Latest local result:
-- `8 passing`
+- `13 passing`
 
 ## Local Run
 

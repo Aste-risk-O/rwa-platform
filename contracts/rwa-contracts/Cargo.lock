@@ -1250,6 +1250,16 @@ dependencies = [
  "anchor-spl",
  "blake3",
  "borsh 1.5.7",
+ "spl-token-2022",
+]
+
+[[package]]
+name = "rwa-transfer-hook"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "spl-tlv-account-resolution",
+ "spl-transfer-hook-interface",
 ]
 
 [[package]]

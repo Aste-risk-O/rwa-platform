@@ -9,6 +9,7 @@ skip-lint = false
 
 [programs.localnet]
 rwa_contracts = "AH6kQ9Uz3Pzizt7hLwjpKhTFRCK5yS3pMjHSVAAaGasB"
+rwa_transfer_hook = "46Qyj9daA4R3gRuEJzVCDuJX43An4oz4PsdzUXjV3sG8"
 
 [registry]
 url = "https://api.apr.dev"

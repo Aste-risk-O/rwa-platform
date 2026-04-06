@@ -3,10 +3,16 @@ import { Program } from "@coral-xyz/anchor";
 import { expect } from "chai";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
+  createAssociatedTokenAccountIdempotentInstruction,
+  createTransferCheckedWithTransferHookInstruction,
+  getExtraAccountMetaAddress,
   getAssociatedTokenAddressSync,
+  getMint,
+  getTransferHook,
   TOKEN_2022_PROGRAM_ID,
 } from "@solana/spl-token";
 import { RwaContracts } from "../target/types/rwa_contracts";
+import { RwaTransferHook } from "../target/types/rwa_transfer_hook";
 
 const { Keypair, PublicKey, SystemProgram, LAMPORTS_PER_SOL } = anchor.web3;
 
@@ -26,9 +32,12 @@ describe("rwa-contracts", () => {
   anchor.setProvider(provider);
 
   const program = anchor.workspace.RwaContracts as Program<RwaContracts>;
+  const hookProgram = anchor.workspace.RwaTransferHook as Program<RwaTransferHook>;
 
   const admin = Keypair.generate();
   const buyer = Keypair.generate();
+  const recipient = Keypair.generate();
+  const outsider = Keypair.generate();
 
   const [marketplace] = PublicKey.findProgramAddressSync(
     [Buffer.from("marketplace")],
@@ -37,6 +46,10 @@ describe("rwa-contracts", () => {
   const asset0 = assetPda(program.programId, 0);
   const asset1 = assetPda(program.programId, 1);
   const shareMint0 = shareMintPda(program.programId, asset0);
+  const extraAccountMetaList0 = getExtraAccountMetaAddress(
+    shareMint0,
+    hookProgram.programId
+  );
   const userState0 = userPda(program.programId, asset0, buyer.publicKey);
   const buyerShares0 = getAssociatedTokenAddressSync(
     shareMint0,
@@ -45,10 +58,28 @@ describe("rwa-contracts", () => {
     TOKEN_2022_PROGRAM_ID,
     ASSOCIATED_TOKEN_PROGRAM_ID
   );
+  const recipientUserState0 = userPda(program.programId, asset0, recipient.publicKey);
+  const outsiderUserState0 = userPda(program.programId, asset0, outsider.publicKey);
+  const recipientShares0 = getAssociatedTokenAddressSync(
+    shareMint0,
+    recipient.publicKey,
+    false,
+    TOKEN_2022_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  );
+  const outsiderShares0 = getAssociatedTokenAddressSync(
+    shareMint0,
+    outsider.publicKey,
+    false,
+    TOKEN_2022_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  );
 
   before(async () => {
     await airdrop(admin.publicKey, 10 * LAMPORTS_PER_SOL);
     await airdrop(buyer.publicKey, 10 * LAMPORTS_PER_SOL);
+    await airdrop(recipient.publicKey, 10 * LAMPORTS_PER_SOL);
+    await airdrop(outsider.publicKey, 10 * LAMPORTS_PER_SOL);
   });
 
   it("initialize_marketplace creates the marketplace state", async () => {
@@ -102,6 +133,7 @@ describe("rwa-contracts", () => {
         assetState: asset0,
         shareMint: shareMint0,
         admin: admin.publicKey,
+        transferHookProgram: hookProgram.programId,
         tokenProgram: TOKEN_2022_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
@@ -109,10 +141,33 @@ describe("rwa-contracts", () => {
       .rpc();
 
     const asset = (await program.account.assetState.fetch(asset0)) as any;
+    const mint = await waitForMint(shareMint0);
+    const transferHook = getTransferHook(mint);
     const supply = await provider.connection.getTokenSupply(shareMint0);
 
     expect(asset.shareMint.toBase58()).to.eq(shareMint0.toBase58());
+    expect(transferHook?.programId.toBase58()).to.eq(hookProgram.programId.toBase58());
     expect(supply.value.amount).to.eq("0");
+  });
+
+  it("configure_asset_hook writes the validation PDA for transfer-hook account resolution", async () => {
+    await hookProgram.methods
+      .configureAssetHook()
+      .accounts({
+        admin: admin.publicKey,
+        extraAccountMetaList: extraAccountMetaList0,
+        shareMint: shareMint0,
+        assetState: asset0,
+        rwaContractsProgram: program.programId,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([admin])
+      .rpc();
+
+    const metaAccount = await provider.connection.getAccountInfo(extraAccountMetaList0);
+
+    expect(metaAccount).to.not.eq(null);
+    expect(metaAccount?.owner.toBase58()).to.eq(hookProgram.programId.toBase58());
   });
 
   it("add_to_whitelist sets UserState.is_whitelisted to true", async () => {
@@ -132,6 +187,38 @@ describe("rwa-contracts", () => {
     expect(user.wallet.toBase58()).to.eq(buyer.publicKey.toBase58());
     expect(user.isWhitelisted).to.eq(true);
     expect(user.sharesOwned.toString()).to.eq("0");
+  });
+
+  it("add_to_whitelist can approve a second holder for future compliance checks", async () => {
+    await program.methods
+      .addToWhitelist(recipient.publicKey)
+      .accounts({
+        assetState: asset0,
+        userState: recipientUserState0,
+        admin: admin.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([admin])
+      .rpc();
+
+    const user = (await program.account.userState.fetch(recipientUserState0)) as any;
+    expect(user.isWhitelisted).to.eq(true);
+  });
+
+  it("set_whitelist_status can register an explicitly blocked wallet", async () => {
+    await program.methods
+      .setWhitelistStatus(outsider.publicKey, false)
+      .accounts({
+        assetState: asset0,
+        userState: outsiderUserState0,
+        admin: admin.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([admin])
+      .rpc();
+
+    const user = (await program.account.userState.fetch(outsiderUserState0)) as any;
+    expect(user.isWhitelisted).to.eq(false);
   });
 
   it("buy_shares increases shares_owned, reserve_pool, and token balance", async () => {
@@ -273,6 +360,47 @@ describe("rwa-contracts", () => {
     );
   });
 
+  it("transfer hook rejects direct transfers to a non-whitelisted recipient", async () => {
+    await ensureAta(outsider.publicKey, outsiderShares0);
+
+    const ix = await createTransferCheckedWithTransferHookInstruction(
+      provider.connection,
+      buyerShares0,
+      shareMint0,
+      outsiderShares0,
+      buyer.publicKey,
+      1n,
+      0,
+      [],
+      "confirmed",
+      TOKEN_2022_PROGRAM_ID
+    );
+
+    await expectRpcFailure(sendSigned(ix, [buyer]), "Recipient wallet is not whitelisted");
+  });
+
+  it("transfer hook blocks direct secondary transfers even for whitelisted recipients", async () => {
+    await ensureAta(recipient.publicKey, recipientShares0);
+
+    const ix = await createTransferCheckedWithTransferHookInstruction(
+      provider.connection,
+      buyerShares0,
+      shareMint0,
+      recipientShares0,
+      buyer.publicKey,
+      1n,
+      0,
+      [],
+      "confirmed",
+      TOKEN_2022_PROGRAM_ID
+    );
+
+    await expectRpcFailure(
+      sendSigned(ix, [buyer]),
+      "Direct secondary transfers are disabled"
+    );
+  });
+
   it("initialize_asset can add another marketplace asset", async () => {
     await program.methods
       .initializeAsset(
@@ -308,6 +436,61 @@ describe("rwa-contracts", () => {
 
   async function sleep(ms: number) {
     await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function waitForMint(mint: PublicKey) {
+    let lastError: unknown;
+
+    for (let i = 0; i < 10; i += 1) {
+      try {
+        return await getMint(
+          provider.connection,
+          mint,
+          "confirmed",
+          TOKEN_2022_PROGRAM_ID
+        );
+      } catch (error) {
+        lastError = error;
+        await sleep(300);
+      }
+    }
+
+    throw lastError;
+  }
+
+  async function ensureAta(owner: PublicKey, ata: PublicKey) {
+    const info = await provider.connection.getAccountInfo(ata);
+    if (info) {
+      return;
+    }
+
+    const ix = createAssociatedTokenAccountIdempotentInstruction(
+      admin.publicKey,
+      ata,
+      owner,
+      shareMint0,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+
+    await sendSigned(ix, [admin]);
+  }
+
+  async function sendSigned(
+    instruction: anchor.web3.TransactionInstruction,
+    signers: anchor.web3.Signer[]
+  ) {
+    const tx = new anchor.web3.Transaction().add(instruction);
+    return provider.sendAndConfirm(tx, signers);
+  }
+
+  async function expectRpcFailure(promise: Promise<unknown>, message: string) {
+    try {
+      await promise;
+      expect.fail(`expected transaction to fail with: ${message}`);
+    } catch (error: any) {
+      expect(String(error)).to.include(message);
+    }
   }
 });
 

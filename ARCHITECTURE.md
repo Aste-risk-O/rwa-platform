@@ -9,6 +9,8 @@ Current demo model:
 - each asset has its own `Token-2022` share mint
 - investors are whitelisted per asset
 - investors buy tokenized shares, accrue yield, and can instant sell back
+- each share mint is wired to a dedicated transfer-hook program
+- direct peer-to-peer token transfers are compliance-gated on-chain
 
 Initial demo asset:
 - Astana coffee shop
@@ -25,14 +27,19 @@ Initial demo asset:
 
 ## Current On-Chain Model
 
-Implemented instructions:
+Implemented marketplace instructions:
 1. `initialize_marketplace`
 2. `initialize_asset`
 3. `initialize_share_mint`
 4. `add_to_whitelist`
-5. `buy_shares`
-6. `claim_yield`
-7. `instant_sell`
+5. `set_whitelist_status`
+6. `buy_shares`
+7. `claim_yield`
+8. `instant_sell`
+
+Implemented hook-program instructions:
+1. `configure_asset_hook`
+2. `execute` (`Token-2022` transfer-hook entrypoint)
 
 Economic model today:
 - share price is fixed at `1 SOL`
@@ -71,6 +78,15 @@ Economic model today:
 - token standard: `Token-2022`
 - decimals: `0`
 - mint authority: `asset_state` PDA
+- transfer hook program: `rwa-transfer-hook`
+
+`ExtraAccountMetaList`
+- seeds: `["extra-account-metas", share_mint]`
+- owner: `rwa-transfer-hook`
+- purpose: gives Token-2022 the extra accounts needed to resolve:
+  - `asset_state`
+  - `rwa_contracts` program id
+  - destination `UserState` PDA
 
 ## Instruction Behavior
 
@@ -84,10 +100,16 @@ Economic model today:
 
 `initialize_share_mint`
 - creates one `Token-2022` mint for the asset
+- initializes the mint with the `TransferHook` extension
 - stores mint pubkey in `AssetState`
 
 `add_to_whitelist`
 - creates per-user per-asset investor state
+
+`set_whitelist_status`
+- admin-only helper for explicit allow/deny state
+- can initialize a `UserState` PDA with `is_whitelisted = false`
+- useful for compliance-driven negative tests and future admin tooling
 
 `buy_shares`
 - checks whitelist status
@@ -105,20 +127,36 @@ Economic model today:
 - decreases owned and sold shares
 - pays `90%` of fixed share price from reserve pool
 
+`configure_asset_hook`
+- creates the transfer-hook validation PDA for a specific share mint
+- stores the extra account metas needed to derive destination `UserState`
+
+`execute`
+- runs on every direct `Token-2022` transfer for the share mint
+- verifies destination wallet has a matching per-asset `UserState`
+- requires destination `UserState.is_whitelisted = true`
+- currently disables secondary peer-to-peer transfers even between whitelisted users
+- this prevents token balances from diverging from entitlement accounting while
+  `shares_owned` still lives in the marketplace program
+
 ## Test Coverage
 
 Current Anchor tests cover:
 - marketplace initialization
 - asset creation
 - share mint creation
+- transfer-hook metadata account creation
 - whitelist creation
+- explicit blocked-wallet state via `set_whitelist_status`
 - token minting on purchase
 - yield accrual and payout
 - token burn on sell
+- direct transfer rejection for non-whitelisted recipient
+- direct secondary transfer rejection for whitelisted recipient
 - second asset creation in the same marketplace
 
 Latest local status:
-- `anchor test` -> `8 passing`
+- `anchor test` -> `13 passing`
 
 ## Asset Binding
 
@@ -137,13 +175,16 @@ Latest local status:
 - fiat rent payment confirmations
 - marketplace frontend
 - secondary market order book
+- entitlement-sync for true peer-to-peer secondary trading
 
 ## Next Technical Steps
 
 - add token metadata flow for asset share mint
 - add explicit admin reserve top-up instruction
+- add negative tests for buy/sell/claim failure branches
 - deploy to devnet
 - optionally switch yield/payout demo from lamports to devnet USDC
+- decide whether to keep transfers blocked or move to full secondary-market accounting
 - build frontend marketplace and wallet flow
 
 ## Legal Direction
