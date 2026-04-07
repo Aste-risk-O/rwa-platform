@@ -3,9 +3,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Aste-risk-O/rwa-platform/actions/workflows/frontend-ci.yml">
-    <img src="https://github.com/Aste-risk-O/rwa-platform/actions/workflows/frontend-ci.yml/badge.svg" alt="Frontend CI" />
-  </a>
   <img src="https://img.shields.io/badge/cluster-localnet%20%2F%20devnet-0b1626?style=flat-square" alt="Cluster localnet/devnet" />
   <img src="https://img.shields.io/badge/token-2022-0f1a29?style=flat-square" alt="Token-2022" />
   <img src="https://img.shields.io/badge/license-MIT-1d4d3a?style=flat-square" alt="MIT license" />
