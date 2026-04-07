@@ -6,7 +6,7 @@
   "metadataPath": "./astana-coffee-shop.metadata.json",
   "documentPath": "./documents/astana-coffee-shop.bundle-manifest.json",
   "totalShares": 1000,
-  "yieldRatePerDay": 86400,
+  "yieldRatePerDay": 361644,
   "reserveTopUpLamports": 3000000000,
   "initialWhitelist": []
 }

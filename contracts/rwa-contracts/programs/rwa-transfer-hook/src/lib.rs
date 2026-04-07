@@ -13,7 +13,7 @@ use spl_tlv_account_resolution::{
 use spl_transfer_hook_interface::instruction::ExecuteInstruction;
 use std::convert::TryInto;
 
-declare_id!("46Qyj9daA4R3gRuEJzVCDuJX43An4oz4PsdzUXjV3sG8");
+declare_id!("5ShaaE6XrmkWSE7Uco6J1yrj8Wdg8HViyg9Mgz7TBHwv");
 
 const EXTRA_ACCOUNT_METAS_SEED: &[u8] = b"extra-account-metas";
 const DESTINATION_ACCOUNT_INDEX: u8 = 2;
@@ -22,7 +22,7 @@ const DESTINATION_TOKEN_OWNER_LEN: u8 = 32;
 const ASSET_STATE_EXECUTE_INDEX: u8 = 5;
 const RWA_PROGRAM_EXECUTE_INDEX: u8 = 6;
 
-pub const RWA_CONTRACTS_ID: Pubkey = pubkey!("AH6kQ9Uz3Pzizt7hLwjpKhTFRCK5yS3pMjHSVAAaGasB");
+pub const RWA_CONTRACTS_ID: Pubkey = pubkey!("G9JJsriFpqxsDzDd6NwiwQLuNuQYdEbbeAVWKwNSNaFC");
 
 #[program]
 pub mod rwa_transfer_hook {

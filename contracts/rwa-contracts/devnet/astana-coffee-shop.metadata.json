@@ -3,6 +3,7 @@
   "symbol": "ACS",
   "description": "Tokenized revenue-share demo asset for the RWA marketplace prototype on Solana.",
   "external_url": "https://github.com/Aste-risk-O/rwa-platform",
+  "image": "/images/astana-coffee-shop-front.webp",
   "attributes": [
     {
       "trait_type": "city",
@@ -18,10 +19,20 @@
     }
   ],
   "properties": {
+    "display_name": "Astana Coffee Shop",
+    "address": "Kabanbay Batyr Avenue 53, Astana, Kazakhstan",
     "issuer": "Demo SPV placeholder",
     "document_manifest_url": "https://raw.githubusercontent.com/Aste-risk-O/rwa-platform/main/contracts/rwa-contracts/devnet/documents/astana-coffee-shop.bundle-manifest.json",
     "document_manifest_sha256": "2c26d29ac876ca77641f852ac34c7a34184440ee4aa40f5747d886e5496a9f1c",
     "asset_id": 0,
-    "compliance_model": "Token-2022 transfer hook with per-asset whitelist"
+    "compliance_model": "Token-2022 transfer hook with per-asset whitelist",
+    "projected_annual_yield_percent": 13.2,
+    "hero_image": "/images/astana-coffee-shop-front.webp",
+    "proof_image": "/images/astana-coffee-shop-entry.webp",
+    "gallery_images": [
+      "/images/astana-coffee-shop-front.webp",
+      "/images/astana-coffee-shop-entry.webp",
+      "/images/astana-coffee-shop-winter.webp"
+    ]
   }
 }

@@ -20,7 +20,7 @@ use spl_token_metadata_interface::{
     state::Field as TokenMetadataField,
 };
 
-declare_id!("AH6kQ9Uz3Pzizt7hLwjpKhTFRCK5yS3pMjHSVAAaGasB");
+declare_id!("G9JJsriFpqxsDzDd6NwiwQLuNuQYdEbbeAVWKwNSNaFC");
 
 const SHARE_PRICE_LAMPORTS: u64 = 1_000_000_000;
 const SECONDS_PER_DAY: u64 = 86_400;
@@ -37,7 +37,7 @@ const SHARE_MINT_BASE_ACCOUNT_LEN: usize = 302;
 //   * additional fields: asset_id, document_hash
 const SHARE_MINT_ACCOUNT_MAX_LEN: usize = 914;
 const SHARE_METADATA_SYMBOL_MAX_LEN: usize = 16;
-pub const RWA_TRANSFER_HOOK_ID: Pubkey = pubkey!("46Qyj9daA4R3gRuEJzVCDuJX43An4oz4PsdzUXjV3sG8");
+pub const RWA_TRANSFER_HOOK_ID: Pubkey = pubkey!("5ShaaE6XrmkWSE7Uco6J1yrj8Wdg8HViyg9Mgz7TBHwv");
 
 #[program]
 pub mod rwa_contracts {

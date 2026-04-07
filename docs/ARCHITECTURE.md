@@ -23,7 +23,7 @@ Initial demo asset:
 - Solana/Agave toolchain `2.3.0`
 - JS `@coral-xyz/anchor ^0.32.1`
 - JS `@solana/spl-token ^0.4.14`
-- frontend still planned, not implemented in this repo
+- Next.js investor demo frontend in `app`
 
 ## Current On-Chain Model
 
@@ -213,7 +213,7 @@ Supporting JS scripts:
 - KYC payloads
 - raw PDF/legal files
 - fiat rent payment confirmations
-- marketplace frontend
+- production marketplace frontend beyond the current localnet investor demo
 - secondary market order book
 - entitlement-sync for true peer-to-peer secondary trading
 
